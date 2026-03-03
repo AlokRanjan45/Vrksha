@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>🌳 VRKSHA - Agri-tech Advisor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#e6f3e6}
+  .chat-message-user{background:#22b5c5;color:#fff;padding:.75rem;border-radius:1rem;border-bottom-right-radius:0;max-width:80%;align-self:flex-end}
+  .chat-message-ai{background:#dff3ec;color:#0f5132;padding:.75rem;border-radius:1rem;border-bottom-left-radius:0;max-width:80%;align-self:flex-start}
+  .message-container{display:flex;flex-direction:column;gap:1rem;padding:1rem;overflow-y:auto;flex-grow:1}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50}
+  .message-modal{background:#fff;padding:1.25rem;border-radius:.75rem;box-shadow:0 10px 30px rgba(2,6,23,.2);width:min(720px,96%)}
+  .hidden{display:none}
+  button.listening{background:#059669 !important}
+</style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+  <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-6 flex flex-col h-[90vh]">
+    <header class="text-center mb-4">
+      <h1 class="text-3xl font-bold text-green-800">🌳 VRKSHA</h1>
+      <p class="text-sm text-gray-600">AI Agricultural Advisor</p>
+    </header>
+
+    <!-- controls -->
+    <div class="flex gap-3 mb-4">
+      <select id="language-select" class="flex-1 p-2 rounded-full border">
+        <option value="en-US">English</option>
+        <option value="hi-IN">हिन्दी</option>
+        <option value="te-IN">తెలుగు</option>
+        <option value="mr-IN">मराठी</option>
+        <option value="ta-IN">தமிழ்</option>
+        <option value="bn-BD">বাংলা</option>
+        <option value="pa-IN">ਪੰਜਾਬੀ</option>
+      </select>
+
+      <select id="voice-select" class="flex-1 p-2 rounded-full border"><option value="">Default Voice</option></select>
+
+      <button id="record-button" class="p-3 bg-red-500 text-white rounded-full">🎤</button>
+    </div>
+
+    <div class="flex gap-2 items-center mb-4">
+      <input id="location-input" placeholder="Enter your city" class="flex-1 p-2 border rounded-2xl"/>
+      <button id="set-location-button" class="p-3 bg-green-600 text-white rounded-2xl">📍</button>
+    </div>
+
+    <!-- chat -->
+    <main id="chat-container" class="message-container bg-gray-50 rounded-2xl border p-4 flex-1 min-h-0">
+      <div class="chat-message-ai">Hello! I am VRKSHA — how can I help you today?</div>
+    </main>
+
+    <div id="loading-indicator" class="hidden mt-2 flex justify-center"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-800"></div></div>
+
+    <div class="flex gap-3 mt-4 items-center">
+      <input id="prompt-input" placeholder="Type your message" class="flex-1 p-2 border rounded-2xl"/>
+      <button id="send-button" class="p-2 bg-green-600 text-white rounded-2xl">➡</button>
+    </div>
+
+    <div class="flex justify-around gap-4 mt-4">
+      <div class="text-center"><button id="camera-button" class="p-3 bg-yellow-500 text-white rounded-2xl">📷</button><div class="text-xs mt-1">Camera</div></div>
+      <div class="text-center"><button id="upload-button" class="p-3 bg-amber-600 text-white rounded-2xl">🖼</button><div class="text-xs mt-1">Upload</div></div>
+      <input type="file" id="image-upload" accept="image/*" class="hidden">
+      <div class="text-center"><button id="market-button" class="p-3 bg-blue-500 text-white rounded-2xl">💹</button><div class="text-xs mt-1">Market</div></div>
+      <div class="text-center"><button id="schemes-button" class="p-3 bg-indigo-600 text-white rounded-2xl">📑</button><div class="text-xs mt-1">Schemes</div></div>
+      <div class="text-center"><button id="feedback-button" class="p-3 bg-purple-500 text-white rounded-2xl">💬</button><div class="text-xs mt-1">Feedback</div></div>
+    </div>
+
+    <video id="camera-preview" autoplay playsinline class="w-full rounded-2xl hidden mt-4"></video>
+    <canvas id="camera-canvas" class="hidden"></canvas>
+    <img id="captured-image" class="w-full mt-4 rounded-2xl hidden" />
+  </div>
+
+  <!-- feedback modal -->
+  <div id="feedback-modal" class="hidden modal-overlay"><div class="message-modal"><h3 class="text-lg font-semibold mb-2">Your feedback</h3><textarea id="feedback-text" rows="4" class="w-full p-2 border rounded mb-3"></textarea><div class="flex gap-3 justify-end"><button id="submit-feedback-button" class="px-3 py-2 bg-green-500 text-white rounded">Submit</button><button id="close-feedback-button" class="px-3 py-2 bg-gray-200 rounded">Close</button></div></div></div>
+
+<script>
+/* ----------------- CONFIG ----------------- */
+const GEMINI_KEY = "AIzaSyDDk92-56NbCxXCOIbE8Sylv_mnsgAUUFI";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
+
+/* ----------------- DOM ----------------- */
+const $ = id => document.getElementById(id);
+const chat=$('chat-container'),input=$('prompt-input'),sendBtn=$('send-button');
+const recBtn=$('record-button'),langSel=$('language-select'),voiceSel=$('voice-select');
+const load=$('loading-indicator'),locIn=$('location-input'),setLoc=$('set-location-button');
+const imgIn=$('image-upload'),upBtn=$('upload-button'),camBtn=$('camera-button');
+const camPrev=$('camera-preview'),camCanvas=$('camera-canvas'),capImg=$('captured-image');
+const schemesBtn=$('schemes-button'),marketBtn=$('market-button');
+const fbBtn=$('feedback-button'),fbModal=$('feedback-modal'),fbTxt=$('feedback-text');
+const fbSubmit=$('submit-feedback-button'),fbClose=$('close-feedback-button');
+
+let voices=[],userLocation=localStorage.getItem('vrksha_location')||'';
+
+/* ----------------- UI helpers ----------------- */
+function appendMessage(text,cls,speakFlag=false){
+  const d=document.createElement('div');d.className=cls;d.textContent=text;
+  chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+  if(speakFlag) speak(text);
+}
+const showUser=t=>appendMessage(t,'chat-message-user');
+const showAI=(t,s=true)=>appendMessage(t,'chat-message-ai',s);
+function showLoading(){load.classList.remove('hidden');}
+function hideLoading(){load.classList.add('hidden');}
+
+/* ----------------- TTS ----------------- */
+function loadVoices(){
+  voices=speechSynthesis.getVoices()||[];
+  voiceSel.innerHTML='<option value="">Default Voice</option>';
+  voices.forEach((v,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${v.name} (${v.lang})`;voiceSel.appendChild(o);});
+}
+if('speechSynthesis'in window){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
+function pickVoice(){
+  if(voiceSel.value!==''&&voices[voiceSel.value])return voices[voiceSel.value];
+  return voices.find(v=>v.lang===langSel.value)||voices.find(v=>v.default)||voices[0]||null;
+}
+function speak(text){
+  if(!('speechSynthesis'in window))return;
+  let t=String(text||'').replace(/[*#_`~>|-]/g,' ');
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);
+  u.lang=langSel.value||'en-US';const v=pickVoice();if(v)u.voice=v;
+  speechSynthesis.speak(u);
+}
+
+/* ----------------- Gemini Call ----------------- */
+async function callModel(payload){
+  const res=await fetch(GEMINI_URL+GEMINI_KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  return await res.json();
+}
+
+/* ----------------- Chat ----------------- */
+async function sendTextMessage(text){
+  if(!text.trim())return;showUser(text);input.value='';showLoading();
+  try{
+    const langName=langSel.options[langSel.selectedIndex].text||'English';
+    const payload={contents:[{role:"user",parts:[{text:`Respond in ${langName}. You are VRKSHA agricultural advisor. Location: ${userLocation}. User: ${text}`}]}]};
+    const json=await callModel(payload);
+    const reply=json?.candidates?.[0]?.content?.parts?.[0]?.text||'No response.';
+    showAI(reply,true);
+  }catch(e){showAI('⚠ Error contacting AI.',true);}finally{hideLoading();}
+}
+
+/* ----------------- Soil Analysis ----------------- */
+async function analyzeSoilImage(dataUrl){
+  showUser('🖼 Soil image sent');showLoading();
+  try{
+    const langName=langSel.options[langSel.selectedIndex].text||'English';
+    const prompt=`Respond in ${langName}. You are VRKSHA. The user uploaded soil photo. Return JSON with: ph, moisture, quality, condition, precautions[], cures[], recommended_tests[], confidence, notes.`;
+    const payload={contents:[{role:"user",parts:[{text:prompt},{inline_data:{mime_type:"image/png",data:dataUrl.split(',')[1]}}]}]};
+    const json=await callModel(payload);
+    const raw=json?.candidates?.[0]?.content?.parts?.[0]?.text||'';
+    const obj=extractJSON(raw);if(obj)showAI(formatSoil(obj),true);else showAI(raw,true);
+  }catch(e){showAI('⚠ Error analyzing soil.',true);}finally{hideLoading();}
+}
+function extractJSON(t){const m=t.match(/```(?:json)?([\s\S]*?)```/i);const c=m?m[1]:t;try{return JSON.parse(c);}catch{return null;}}
+function formatSoil(o){
+  const lines=[];if(o.ph)lines.push(`pH value: ${o.ph}`);if(o.moisture)lines.push(`Moisture: ${o.moisture}`);
+  if(o.quality)lines.push(`Soil quality: ${o.quality}`);if(o.condition)lines.push(`Condition: ${o.condition}`);
+  if(o.precautions)lines.push('Precautions:\n• '+o.precautions.join('\n• '));
+  if(o.cures)lines.push('Cures:\n'+o.cures.map((c,i)=>`${i+1}. ${c}`).join('\n'));
+  if(o.recommended_tests)lines.push('Suggested tests: '+o.recommended_tests.join(', '));
+  if(o.confidence)lines.push(`Confidence: ${o.confidence}%`);if(o.notes)lines.push(`Notes: ${o.notes}`);
+  return lines.join('\n');
+}
+
+/* ----------------- Camera & Upload ----------------- */
+camBtn.onclick=async()=>{
+  try{
+    if(camPrev.classList.contains('hidden')){
+      const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      camPrev.srcObject=s;camPrev.classList.remove('hidden');camBtn.textContent='📸 Capture';camPrev.play();
+    }else{
+      camCanvas.width=camPrev.videoWidth;camCanvas.height=camPrev.videoHeight;
+      camCanvas.getContext('2d').drawImage(camPrev,0,0);const data=camCanvas.toDataURL('image/png');
+      capImg.src=data;capImg.classList.remove('hidden');camPrev.srcObject.getTracks().forEach(t=>t.stop());
+      camPrev.classList.add('hidden');camBtn.textContent='📷';await analyzeSoilImage(data);
+    }
+  }catch(e){showAI('⚠ Camera error',true);}
+};
+upBtn.onclick=()=>imgIn.click();
+imgIn.onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{capImg.src=ev.target.result;capImg.classList.remove('hidden');analyzeSoilImage(ev.target.result);};r.readAsDataURL(f);};
+
+/* ----------------- Speech Recognition ----------------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let recognition=null,listening=false;
+if(SR){recognition=new SR();recognition.onresult=e=>{const t=e.results[0][0].transcript;sendTextMessage(t);stopRec();};}
+function startRec(){if(!recognition)return;recognition.lang=langSel.value;recognition.start();listening=true;recBtn.textContent='⏹ Stop';}
+function stopRec(){if(!recognition)return;recognition.stop();listening=false;recBtn.textContent='🎤';}
+recBtn.onclick=()=>listening?stopRec():startRec();
+
+/* ----------------- Buttons ----------------- */
+schemesBtn.onclick=()=>showAI("• PM-Kisan Samman Nidhi: ₹6000/year\n• Soil Health Card: Free soil testing\n• PMFBY: Crop insurance",true);
+marketBtn.onclick=()=>{const q=prompt('Enter commodity & market','Rice in Bengaluru');if(q)sendTextMessage(q);};
+fbBtn.onclick=()=>fbModal.classList.remove('hidden');
+fbClose.onclick=()=>fbModal.classList.add('hidden');
+fbSubmit.onclick=()=>{showAI('🙏 Thanks for your feedback!',true);fbTxt.value='';fbModal.classList.add('hidden');};
+setLoc.onclick=()=>{userLocation=locIn.value;localStorage.setItem('vrksha_location',userLocation);showAI('📍 Location set: '+userLocation,true);};
+
+/* ----------------- Send ----------------- */
+sendBtn.onclick=()=>sendTextMessage(input.value);
+input.addEventListener('keydown',e=>{if(e.key==='Enter')sendTextMessage(input.value);});
+</script>
+</body>
+</html> this is my vrksha project see this and give me points from this to add in my resume
